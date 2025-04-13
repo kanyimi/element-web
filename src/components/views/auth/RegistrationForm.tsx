@@ -1,24 +1,32 @@
 /*
-Copyright 2024 New Vector Ltd.
 Copyright 2019 Michael Telatynski <7t3chguy@gmail.com>
-Copyright 2015, 2016 , 2017, 2018, 2019, 2020 The Matrix.org Foundation C.I.C.
+Copyright 2015, 2016, 2017, 2018, 2019, 2020 The Matrix.org Foundation C.I.C.
 
-SPDX-License-Identifier: AGPL-3.0-only OR GPL-3.0-only OR LicenseRef-Element-Commercial
-Please see LICENSE files in the repository root for full details.
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
 */
 
-import React, { type JSX, type BaseSyntheticEvent, type ComponentProps, type ReactNode } from "react";
-import { type MatrixClient, MatrixError } from "matrix-js-sdk/src/matrix";
+import React, { BaseSyntheticEvent, ReactNode } from "react";
+import { MatrixClient, MatrixError } from "matrix-js-sdk/src/matrix";
 import { logger } from "matrix-js-sdk/src/logger";
 
 import * as Email from "../../../email";
-import { looksValid as phoneNumberLooksValid, type PhoneNumberCountryDefinition } from "../../../phonenumber";
+import { looksValid as phoneNumberLooksValid, PhoneNumberCountryDefinition } from "../../../phonenumber";
 import Modal from "../../../Modal";
 import { _t, _td } from "../../../languageHandler";
 import SdkConfig from "../../../SdkConfig";
 import { SAFE_LOCALPART_REGEX } from "../../../Registration";
-import withValidation, { type IFieldState, type IValidationResult } from "../elements/Validation";
-import { type ValidatedServerConfig } from "../../../utils/ValidatedServerConfig";
+import withValidation, { IFieldState, IValidationResult } from "../elements/Validation";
+import { ValidatedServerConfig } from "../../../utils/ValidatedServerConfig";
 import EmailField from "./EmailField";
 import PassphraseField from "./PassphraseField";
 import Field from "../elements/Field";
@@ -28,6 +36,7 @@ import PassphraseConfirmField from "./PassphraseConfirmField";
 import { PosthogAnalytics } from "../../../PosthogAnalytics";
 
 enum RegistrationField {
+    DisplayName = "field_displayname",
     Email = "field_email",
     PhoneNumber = "field_phone_number",
     Username = "field_username",
@@ -52,17 +61,19 @@ interface IProps {
     defaultPhoneNumber?: string;
     defaultUsername?: string;
     defaultPassword?: string;
+    defaultDisplayName?: string;
+    onDisplayNameChange?: (displayName: string) => void;
     flows: {
         stages: string[];
     }[];
     serverConfig: ValidatedServerConfig;
     canSubmit?: boolean;
     matrixClient: MatrixClient;
-    mobileRegister?: boolean;
 
     onRegisterClick(params: {
         username: string;
         password: string;
+        displayName?: string;
         email?: string;
         phoneCountry?: string;
         phoneNumber?: string;
@@ -76,6 +87,7 @@ interface IState {
     // The ISO2 country code selected in the phone number entry
     phoneCountry?: string;
     username: string;
+    displayName: string;
     email: string;
     phoneNumber: string;
     password: string;
@@ -87,6 +99,7 @@ interface IState {
  * A pure UI component which displays a registration form.
  */
 export default class RegistrationForm extends React.PureComponent<IProps, IState> {
+    private [RegistrationField.DisplayName]: Field | null = null;
     private [RegistrationField.Email]: Field | null = null;
     private [RegistrationField.Password]: Field | null = null;
     private [RegistrationField.PasswordConfirm]: Field | null = null;
@@ -105,6 +118,7 @@ export default class RegistrationForm extends React.PureComponent<IProps, IState
             fieldValid: {},
             phoneCountry: this.props.defaultPhoneCountry,
             username: this.props.defaultUsername || "",
+            displayName: this.props.defaultDisplayName || "",
             email: this.props.defaultEmail || "",
             phoneNumber: this.props.defaultPhoneNumber || "",
             password: this.props.defaultPassword || "",
@@ -161,6 +175,7 @@ export default class RegistrationForm extends React.PureComponent<IProps, IState
         const promise = this.props.onRegisterClick({
             username: this.state.username.trim(),
             password: this.state.password.trim(),
+            displayName: this.state.displayName.trim(),
             email: email,
             phoneCountry: this.state.phoneCountry,
             phoneNumber: this.state.phoneNumber,
@@ -184,6 +199,7 @@ export default class RegistrationForm extends React.PureComponent<IProps, IState
 
         const fieldIDsInDisplayOrder = [
             RegistrationField.Username,
+            RegistrationField.DisplayName,
             RegistrationField.Password,
             RegistrationField.PasswordConfirm,
             RegistrationField.Email,
@@ -197,6 +213,7 @@ export default class RegistrationForm extends React.PureComponent<IProps, IState
             if (!field) {
                 continue;
             }
+            await field.validate({ allowEmpty: fieldID === RegistrationField.DisplayName });
             // We must wait for these validations to finish before queueing
             // up the setState below so our setState goes in the queue after
             // all the setStates from these validate calls (that's how we
@@ -248,12 +265,40 @@ export default class RegistrationForm extends React.PureComponent<IProps, IState
             fieldValid,
         });
     }
+    private onDisplayNameChange = (ev: React.ChangeEvent<HTMLInputElement>): void => {
+        this.setState({
+            displayName: ev.target.value,
+        }, () => {
+            // Call the parent's onDisplayNameChange callback if it exists
+            if (this.props.onDisplayNameChange) {
+                this.props.onDisplayNameChange(this.state.displayName);
+            }
+        });
+    };
 
+    private onDisplayNameValidate = async (fieldState: IFieldState): Promise<IValidationResult> => {
+        const result = await this.validateDisplayNameRules(fieldState);
+        this.markFieldValid(RegistrationField.DisplayName, !!result.valid);
+        return result;
+    };
+
+    private validateDisplayNameRules = withValidation({
+        description: () => _t("auth|display_name"),
+        hideDescriptionIfValid: true,
+        rules: [
+            {
+                key: "maxLength",
+                test: ({ value }) => !value || value.length <= 256,
+                invalid: () => _t("auth|display_name_too_long"),
+            },
+        ],
+    });
     private onEmailChange = (ev: React.ChangeEvent<HTMLInputElement>): void => {
         this.setState({
             email: ev.target.value.trim(),
         });
     };
+
 
     private onEmailValidate = (result: IValidationResult): void => {
         this.markFieldValid(RegistrationField.Email, !!result.valid);
@@ -440,13 +485,6 @@ export default class RegistrationForm extends React.PureComponent<IProps, IState
         return true;
     }
 
-    private tooltipAlignment(): ComponentProps<typeof EmailField>["tooltipAlignment"] | undefined {
-        if (this.props.mobileRegister) {
-            return "bottom";
-        }
-        return undefined;
-    }
-
     private renderEmail(): ReactNode {
         if (!this.showEmail()) {
             return null;
@@ -456,15 +494,12 @@ export default class RegistrationForm extends React.PureComponent<IProps, IState
             : _td("auth|registration|continue_without_email_field_label");
         return (
             <EmailField
-                fieldRef={(field) => {
-                    this[RegistrationField.Email] = field;
-                }}
+                fieldRef={(field) => (this[RegistrationField.Email] = field)}
                 label={emailLabel}
                 value={this.state.email}
                 validationRules={this.validateEmailRules.bind(this)}
                 onChange={this.onEmailChange}
                 onValidate={this.onEmailValidate}
-                tooltipAlignment={this.tooltipAlignment()}
             />
         );
     }
@@ -473,32 +508,40 @@ export default class RegistrationForm extends React.PureComponent<IProps, IState
         return (
             <PassphraseField
                 id="mx_RegistrationForm_password"
-                fieldRef={(field) => {
-                    this[RegistrationField.Password] = field;
-                }}
+                fieldRef={(field) => (this[RegistrationField.Password] = field)}
                 minScore={PASSWORD_MIN_SCORE}
                 value={this.state.password}
                 onChange={this.onPasswordChange}
                 onValidate={this.onPasswordValidate}
                 userInputs={[this.state.username]}
-                tooltipAlignment={this.tooltipAlignment()}
             />
         );
     }
-
+    private renderDisplayName(): ReactNode {
+        return (
+            <Field
+                id="mx_RegistrationForm_displayname"
+                ref={(field) => (this[RegistrationField.DisplayName] = field)}
+                type="text"
+                label={_t("auth|display_name")}
+                placeholder={_t("auth|display_name_placeholder")}
+                value={this.state.displayName}
+                onChange={this.onDisplayNameChange}
+                onValidate={this.onDisplayNameValidate}
+                autoComplete="name"
+            />
+        );
+    }
     public renderPasswordConfirm(): JSX.Element {
         return (
             <PassphraseConfirmField
                 id="mx_RegistrationForm_passwordConfirm"
-                fieldRef={(field) => {
-                    this[RegistrationField.PasswordConfirm] = field;
-                }}
+                fieldRef={(field) => (this[RegistrationField.PasswordConfirm] = field)}
                 autoComplete="new-password"
                 value={this.state.passwordConfirm}
                 password={this.state.password}
                 onChange={this.onPasswordConfirmChange}
                 onValidate={this.onPasswordConfirmValidate}
-                tooltipAlignment={this.tooltipAlignment()}
             />
         );
     }
@@ -520,9 +563,7 @@ export default class RegistrationForm extends React.PureComponent<IProps, IState
         );
         return (
             <Field
-                ref={(field) => {
-                    this[RegistrationField.PhoneNumber] = field;
-                }}
+                ref={(field) => (this[RegistrationField.PhoneNumber] = field)}
                 type="text"
                 label={phoneLabel}
                 value={this.state.phoneNumber}
@@ -537,9 +578,7 @@ export default class RegistrationForm extends React.PureComponent<IProps, IState
         return (
             <Field
                 id="mx_RegistrationForm_username"
-                ref={(field) => {
-                    this[RegistrationField.Username] = field;
-                }}
+                ref={(field) => (this[RegistrationField.Username] = field)}
                 type="text"
                 autoFocus={true}
                 label={_t("common|username")}
@@ -547,9 +586,6 @@ export default class RegistrationForm extends React.PureComponent<IProps, IState
                 value={this.state.username}
                 onChange={this.onUsernameChange}
                 onValidate={this.onUsernameValidate}
-                tooltipAlignment={this.tooltipAlignment()}
-                autoCorrect="off"
-                autoCapitalize="none"
             />
         );
     }
@@ -581,28 +617,15 @@ export default class RegistrationForm extends React.PureComponent<IProps, IState
             }
         }
 
-        let passwordFields: JSX.Element | undefined;
-        if (this.props.mobileRegister) {
-            passwordFields = (
-                <>
-                    <div className="mx_AuthBody_fieldRow">{this.renderPassword()}</div>
-                    <div className="mx_AuthBody_fieldRow">{this.renderPasswordConfirm()}</div>
-                </>
-            );
-        } else {
-            passwordFields = (
-                <div className="mx_AuthBody_fieldRow">
-                    {this.renderPassword()}
-                    {this.renderPasswordConfirm()}
-                </div>
-            );
-        }
-
         return (
             <div>
                 <form onSubmit={this.onSubmit}>
+                    <div className="mx_AuthBody_fieldRow">{this.renderDisplayName()}</div>
                     <div className="mx_AuthBody_fieldRow">{this.renderUsername()}</div>
-                    {passwordFields}
+                    <div className="mx_AuthBody_fieldRow">
+                        {this.renderPassword()}
+                        {this.renderPasswordConfirm()}
+                    </div>
                     <div className="mx_AuthBody_fieldRow">
                         {this.renderEmail()}
                         {this.renderPhoneNumber()}

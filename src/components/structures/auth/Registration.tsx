@@ -363,6 +363,21 @@ export default class Registration extends React.Component<IProps, IState> {
 
         const userId = (response as RegisterResponse).user_id;
         const accessToken = (response as RegisterResponse).access_token;
+        // Set display name immediately after registration
+        if (this.state.formVals.displayName) {
+            try {
+                const client = createClient({
+                    baseUrl: this.props.serverConfig.hsUrl,
+                    accessToken: accessToken,
+                    userId: userId,
+                });
+
+                await client.setDisplayName(this.state.formVals.displayName);
+                logger.log("Successfully set display name");
+            } catch (error) {
+                logger.error("Failed to set display name:", error);
+            }
+        }
         if (!userId || !accessToken) throw new Error("Registration failed");
 
         MatrixClientPeg.setJustRegisteredUserId(userId);
@@ -483,10 +498,15 @@ export default class Registration extends React.Component<IProps, IState> {
 
     private makeRegisterRequest = (auth: AuthDict | null): Promise<RegisterResponse> => {
         if (!this.state.matrixClient) throw new Error("Matrix client has not yet been loaded");
-
+       console.log("Registration params:", {
+            username: this.state.formVals.username,
+            display_name: this.state.formVals.displayName, // Should be "paulata"
+            password: "***", // Don't log actual password
+        });
         const registerParams: IRegisterRequestParams = {
             username: this.state.formVals.username,
             password: this.state.formVals.password,
+            display_name: this.state.formVals.displayName,
             initial_device_display_name: this.props.defaultDeviceDisplayName,
             auth: undefined,
             // we still want to avoid the race conditions involved with multiple clients handling registration, but
